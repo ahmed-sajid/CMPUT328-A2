@@ -17,21 +17,21 @@ class Args:
 
     # Hyperparameters
     epochs = 25     # Should easily reach above 65% test acc after 20 epochs with an hidden_size of 64
-    batch_size = None
-    lr = None
-    weight_decay = None
+    batch_size = 64
+    lr = 0.001
+    weight_decay = 1e-4
 
     # TODO: Hyperparameters for ViT
     # Adjust as you see fit
-    input_resolution = None
-    in_channels = None
-    patch_size = None
+    input_resolution = 32
+    in_channels = 3
+    patch_size = 4
     hidden_size = 64
     layers = 6
     heads = 8
 
     # Save your model as "vit-cifar10-{YOUR_CCID}"
-    YOUR_CCID = ""
+    YOUR_CCID = "asajid2"
     name = f"vit-cifar10-{YOUR_CCID}"
 
 class PatchEmbeddings(nn.Module):
@@ -49,9 +49,7 @@ class PatchEmbeddings(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-
-        self.projection = None
-        
+        self.projection = nn.Conv2d(in_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
         # #########################
 
     def forward(
@@ -61,9 +59,8 @@ class PatchEmbeddings(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-
-        embeddings = None
-
+        batch_size = x.shape[0]
+        embeddings = self.projection(x).flatten(2).transpose(1, 2)  # (batch_size, seq_length, hidden_size)
         # #########################
         return embeddings
 
@@ -80,10 +77,8 @@ class PositionEmbedding(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-
-        self.cls_token = None
-        self.position_embeddings = None
-
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches + 1, hidden_size))
         # #########################
 
     def forward(
@@ -93,7 +88,10 @@ class PositionEmbedding(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-
+        batch_size = embeddings.shape[0]
+        cls_token = self.cls_token.expand(batch_size, -1, -1)
+        embeddings = torch.cat((cls_token, embeddings), dim=1)
+        embeddings += self.position_embeddings
         # #########################
         return embeddings
 
@@ -106,22 +104,23 @@ class TransformerEncoderBlock(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-
-        self.attn = None
-        self.ln_1 = None
-        self.mlp = None
-        self.ln_2 = None
-
+        self.attn = nn.MultiheadAttention(embed_dim=d_model, num_heads=n_head, batch_first=True)
+        self.ln_1 = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            nn.Linear(d_model, 4 * d_model),
+            nn.GELU(),
+            nn.Linear(4 * d_model, d_model)
+        )
+        self.ln_2 = nn.LayerNorm(d_model)
         # #########################
 
     def forward(self, x: torch.Tensor):
         # #########################
         # Finish Your Code HERE
         # #########################
-
-
+        x = x + self.attn(self.ln_1(x), self.ln_1(x), self.ln_1(x))[0]
+        x = x + self.mlp(self.ln_2(x))
         # #########################
-
         return x
 
 
@@ -143,23 +142,26 @@ class ViT(nn.Module):
         # #########################
         # Finish Your Code HERE
         # #########################
-        self.patch_embed = None
-        self.pos_embed = None
-        self.ln_pre = None
-        self.transformer = None
-        self.ln_post = None
-        self.classifier = None
-
+        num_patches = (input_resolution // patch_size) ** 2
+        self.patch_embed = PatchEmbeddings(input_resolution, patch_size, hidden_size, in_channels)
+        self.pos_embed = PositionEmbedding(num_patches, hidden_size)
+        self.ln_pre = nn.LayerNorm(hidden_size)
+        self.transformer = nn.Sequential(*[TransformerEncoderBlock(hidden_size, heads) for _ in range(layers)])
+        self.ln_post = nn.LayerNorm(hidden_size)
+        self.classifier = nn.Linear(hidden_size, num_classes)
         # #########################
-
 
     def forward(self, x: torch.Tensor):
         # #########################
         # Finish Your Code HERE
         # #########################
-
+        x = self.patch_embed(x)
+        x = self.pos_embed(x)
+        x = self.ln_pre(x)
+        x = self.transformer(x)
+        x = self.ln_post(x[:, 0])
+        x = self.classifier(x)
         # #########################
-
         return x
 
 
@@ -176,14 +178,23 @@ def transform(
         # #########################
         # Finish Your Code HERE
         # #########################
-        tfm = None
+        tfm = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(input_resolution, padding=4),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ])
         # #########################
 
     else:
         # #########################
         # Finish Your Code HERE
         # #########################
-        tfm = None
+        tfm = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std)
+        ])
         # #########################
 
     return tfm
@@ -232,18 +243,26 @@ def train_vit_model(args):
 
     # -----
     # TODO: Define ViT model here
-    model = None
+    model = ViT(
+        num_classes=args.num_classes,
+        input_resolution=args.input_resolution,
+        patch_size=args.patch_size,
+        in_channels=args.in_channels,
+        hidden_size=args.hidden_size,
+        layers=args.layers,
+        heads=args.heads
+    )
     # print(model)
 
     if torch.cuda.is_available():
         model.cuda()
 
     # TODO: Define loss, optimizer and lr scheduler here
-    criterion = None
+    criterion = nn.CrossEntropyLoss()
 
-    optimizer = None
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     
-    scheduler = None
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
     # #########################
     # Evaluate at the end of each epoch
@@ -256,8 +275,17 @@ def train_vit_model(args):
             # #########################
             # Finish Your Code HERE
             # #########################
+            if torch.cuda.is_available():
+                x = x.cuda()
+                labels = labels.cuda()
+
             # Forward pass
-            loss = None
+            outputs = model(x)
+            loss = criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
             # #########################
 

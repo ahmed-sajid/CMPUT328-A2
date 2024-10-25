@@ -50,6 +50,7 @@ def main():
 
     # -----
     # A few quick test
+    # args.name = "cap-vlm-asajid2"
     model, processor, tokenizer = load_trained_model("./" + args.name)
     print(inference('./flickr8k/images/2631625732_75b714e685.jpg', model, processor, tokenizer))
     print(inference('./flickr8k/images/1215334959_b1970965f7.jpg', model, processor, tokenizer))
