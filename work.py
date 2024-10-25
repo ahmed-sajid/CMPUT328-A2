@@ -32,6 +32,6 @@ style_transfer(
     style_image_path="./sky.jpg",            # Path to style image
     output_image_path="./styled_image.jpg",                 # Path to save styled image
     iterations=1000,                                        # Increased number of iterations
-    content_weight=1e2,                                     # Balance between content and style
-    style_weight=1e34                                       # Heavier emphasis on style
+    content_weight=1e3,                                     # Balance between content and style
+    style_weight=1e20                                       # Heavier emphasis on style
 )
